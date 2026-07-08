@@ -59,7 +59,7 @@ async def report_lots_profit(call: CallbackQuery):
     lines = []
     for lot in lots:
         icon = "📈" if lot["profit"] >= 0 else "📉"
-        lines.append(f"{icon} {lot['name']}: {lot['profit']:.2f} {lot['sale_currency']}")
+        lines.append(f"{icon} {lot['name']}: {lot['profit']:.2f} {lot['received_currency']}")
     text = t(lang, "report_lots_profit") + "\n\n" + "\n".join(lines)
     await call.message.edit_text(text, reply_markup=kb.back_kb(lang, "reports"))
     await call.answer()
