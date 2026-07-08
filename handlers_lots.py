@@ -119,22 +119,21 @@ async def lot_list_closed(call: CallbackQuery):
 # ---------- View lot detail ----------
 
 async def render_lot_detail(lang: str, lot: dict) -> str:
-    currency = lot["purchase_currency"]
+    currency = lot["currency"]
     total_expenses = sum(e["amount"] for e in lot["expenses"] if e["currency"] == currency)
-    total = lot["purchase_amount"] + total_expenses
     status_text = t(lang, STATUS_KEY.get(lot["status"], "status_open"))
 
     text = t(
         lang, "lot_detail",
         name=lot["name"], status=status_text,
         date=lot["created_at"].strftime("%d.%m.%Y"),
-        purchase=lot["purchase_amount"], expenses=total_expenses,
-        currency=currency, total=total,
+        purchase=lot["agreed_amount"], expenses=total_expenses,
+        currency=currency,
     )
     if lot["status"] == "closed":
         text += t(
             lang, "lot_detail_closed_extra",
-            sale=lot["sale_amount"], currency=lot["sale_currency"], profit=lot["profit"],
+            sale=lot["received_amount"], currency=lot["received_currency"], profit=lot["profit"],
         )
     return text
 
@@ -295,7 +294,7 @@ async def lot_close_start(call: CallbackQuery, state: FSMContext):
         await call.answer(t(lang, "lot_already_closed"), show_alert=True)
         return
 
-    await state.update_data(current_lot_id=lot_id, sale_currency=lot["purchase_currency"])
+    await state.update_data(current_lot_id=lot_id, sale_currency=lot["currency"])
     await state.set_state(LotStates.entering_sale_amount)
     await call.message.edit_text(
         t(lang, "enter_sale_price"),
