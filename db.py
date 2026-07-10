@@ -54,6 +54,17 @@ async def get_cash() -> dict:
     if not doc:
         doc = {"_id": "balance", "USD": 0.0, "UZS": 0.0}
         await cash_col.insert_one(doc)
+        return doc
+    # На случай если документ уже существует, но без одного из полей
+    # (например, если баланс создался через $inc только по одной валюте)
+    if "USD" not in doc or "UZS" not in doc:
+        doc.setdefault("USD", 0.0)
+        doc.setdefault("UZS", 0.0)
+        await cash_col.update_one(
+            {"_id": "balance"},
+            {"$set": {"USD": doc["USD"], "UZS": doc["UZS"]}},
+            upsert=True,
+        )
     return doc
 
 
