@@ -235,7 +235,7 @@ async def finalize_expense(message_target, state: FSMContext, user_id: int, comm
         await message_target.edit_text(full_text, reply_markup=kb.lot_detail_kb(lang, lot_id, lot["status"]))
 
 
-# ---------- View expenses ----------
+# ---------- View / edit expenses ----------
 
 @router.callback_query(F.data.startswith("lotaction:viewexp:"))
 async def lot_view_expenses(call: CallbackQuery):
@@ -244,18 +244,88 @@ async def lot_view_expenses(call: CallbackQuery):
     lot = await db.get_lot(lot_id)
 
     if not lot["expenses"]:
-        text = t(lang, "lot_no_expenses")
-    else:
-        lines = []
-        for e in lot["expenses"]:
-            cat_label = t(lang, CAT_KEY.get(e["category"], "cat_other"))
-            lines.append(t(
-                lang, "expense_item",
-                category=cat_label, amount=e["amount"], currency=e["currency"],
-                comment=e["comment"], date=e["date"].strftime("%d.%m.%Y"),
-            ))
-        text = "\n".join(lines)
+        await call.message.edit_text(t(lang, "lot_no_expenses"), reply_markup=kb.lot_detail_kb(lang, lot_id, lot["status"]))
+        await call.answer()
+        return
 
+    cat_labels = {k: t(lang, v) for k, v in CAT_KEY.items()}
+    await call.message.edit_text(
+        t(lang, "expense_edit_choose"),
+        reply_markup=kb.expenses_list_kb(lang, lot_id, lot["expenses"], cat_labels),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("expsel:"))
+async def expense_selected(call: CallbackQuery):
+    lang = await db.get_user_lang(call.from_user.id)
+    _, lot_id, expense_id = call.data.split(":")
+    lot = await db.get_lot(lot_id)
+    expense = next((e for e in lot["expenses"] if e.get("id") == expense_id), None)
+    if not expense:
+        await call.answer()
+        return
+    cat_label = t(lang, CAT_KEY.get(expense["category"], "cat_other"))
+    text = t(lang, "expense_edit_or_delete", category=cat_label, amount=expense["amount"], currency=expense["currency"])
+    await call.message.edit_text(text, reply_markup=kb.expense_action_kb(lang, lot_id, expense_id))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("expedit:"))
+async def expense_edit_start(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_user_lang(call.from_user.id)
+    _, lot_id, expense_id = call.data.split(":")
+    lot = await db.get_lot(lot_id)
+    expense = next((e for e in lot["expenses"] if e.get("id") == expense_id), None)
+    if not expense:
+        await call.answer()
+        return
+    await state.update_data(current_lot_id=lot_id, expense_id=expense_id, currency=expense["currency"])
+    await state.set_state(LotStates.entering_edit_expense_amount)
+    await call.message.edit_text(
+        t(lang, "enter_new_expense_amount", old_amount=expense["amount"], currency=expense["currency"]),
+        reply_markup=kb.cancel_kb(lang),
+    )
+    await call.answer()
+
+
+@router.message(LotStates.entering_edit_expense_amount)
+async def expense_edit_amount_entered(message: Message, state: FSMContext):
+    lang = await db.get_user_lang(message.from_user.id)
+    try:
+        new_amount = float(message.text.replace(",", ".").strip())
+        if new_amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer(t(lang, "invalid_number"))
+        return
+
+    data = await state.get_data()
+    lot_id = data["current_lot_id"]
+    expense_id = data["expense_id"]
+    currency = data["currency"]
+
+    lot = await db.get_lot(lot_id)
+    old_expense = next((e for e in lot["expenses"] if e.get("id") == expense_id), None)
+    old_amount = old_expense["amount"] if old_expense else 0
+
+    await db.update_lot_expense(lot_id, expense_id, new_amount)
+    text = t(lang, "expense_amount_updated", old_amount=old_amount, new_amount=new_amount, currency=currency)
+
+    await state.clear()
+    lot = await db.get_lot(lot_id)
+    detail_text = await render_lot_detail(lang, lot)
+    await message.answer(text + "\n\n" + detail_text, reply_markup=kb.lot_detail_kb(lang, lot_id, lot["status"]))
+
+
+@router.callback_query(F.data.startswith("expdel:"))
+async def expense_delete(call: CallbackQuery):
+    lang = await db.get_user_lang(call.from_user.id)
+    _, lot_id, expense_id = call.data.split(":")
+    await db.delete_lot_expense(lot_id, expense_id)
+    lot = await db.get_lot(lot_id)
+    detail_text = await render_lot_detail(lang, lot)
+    text = t(lang, "expense_deleted") + "\n\n" + detail_text
     await call.message.edit_text(text, reply_markup=kb.lot_detail_kb(lang, lot_id, lot["status"]))
     await call.answer()
 
@@ -327,3 +397,110 @@ async def lot_sale_amount_entered(message: Message, state: FSMContext):
     )
     await state.clear()
     await message.answer(text, reply_markup=kb.back_kb(lang, "lots"))
+
+
+# ---------- Edit agreed amount ----------
+
+@router.callback_query(F.data.startswith("lotaction:editagreed:"))
+async def lot_edit_agreed_start(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_user_lang(call.from_user.id)
+    lot_id = call.data.split(":")[2]
+    lot = await db.get_lot(lot_id)
+    await state.update_data(current_lot_id=lot_id)
+    await state.set_state(LotStates.entering_new_agreed_amount)
+    await call.message.edit_text(
+        t(lang, "enter_new_agreed_amount", old_amount=lot["agreed_amount"], currency=lot["currency"]),
+        reply_markup=kb.cancel_kb(lang),
+    )
+    await call.answer()
+
+
+@router.message(LotStates.entering_new_agreed_amount)
+async def lot_new_agreed_amount_entered(message: Message, state: FSMContext):
+    lang = await db.get_user_lang(message.from_user.id)
+    try:
+        new_amount = float(message.text.replace(",", ".").strip())
+        if new_amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer(t(lang, "invalid_number"))
+        return
+
+    data = await state.get_data()
+    lot_id = data["current_lot_id"]
+    lot = await db.get_lot(lot_id)
+    old_amount = lot["agreed_amount"]
+
+    await db.update_lot_agreed_amount(lot_id, new_amount)
+    text = t(lang, "agreed_amount_updated", old_amount=old_amount, new_amount=new_amount, currency=lot["currency"])
+
+    await state.clear()
+    lot = await db.get_lot(lot_id)
+    detail_text = await render_lot_detail(lang, lot)
+    await message.answer(text + "\n\n" + detail_text, reply_markup=kb.lot_detail_kb(lang, lot_id, lot["status"]))
+
+
+# ---------- Edit received amount (closed lots) ----------
+
+@router.callback_query(F.data.startswith("lotaction:editreceived:"))
+async def lot_edit_received_start(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_user_lang(call.from_user.id)
+    lot_id = call.data.split(":")[2]
+    lot = await db.get_lot(lot_id)
+    await state.update_data(current_lot_id=lot_id)
+    await state.set_state(LotStates.entering_new_received_amount)
+    await call.message.edit_text(
+        t(lang, "enter_new_received_amount", old_amount=lot["received_amount"], currency=lot["received_currency"]),
+        reply_markup=kb.cancel_kb(lang),
+    )
+    await call.answer()
+
+
+@router.message(LotStates.entering_new_received_amount)
+async def lot_new_received_amount_entered(message: Message, state: FSMContext):
+    lang = await db.get_user_lang(message.from_user.id)
+    try:
+        new_amount = float(message.text.replace(",", ".").strip())
+        if new_amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer(t(lang, "invalid_number"))
+        return
+
+    data = await state.get_data()
+    lot_id = data["current_lot_id"]
+    lot = await db.get_lot(lot_id)
+    old_amount = lot["received_amount"]
+    currency = lot["received_currency"]
+
+    new_profit = await db.update_lot_received(lot_id, new_amount)
+    text = t(lang, "received_amount_updated", old_amount=old_amount, new_amount=new_amount, currency=currency, profit=new_profit)
+
+    await state.clear()
+    lot = await db.get_lot(lot_id)
+    detail_text = await render_lot_detail(lang, lot)
+    await message.answer(text + "\n\n" + detail_text, reply_markup=kb.lot_detail_kb(lang, lot_id, lot["status"]))
+
+
+# ---------- Delete lot ----------
+
+@router.callback_query(F.data.startswith("lotaction:delete:"))
+async def lot_delete_confirm(call: CallbackQuery):
+    lang = await db.get_user_lang(call.from_user.id)
+    lot_id = call.data.split(":")[2]
+    lot = await db.get_lot(lot_id)
+    if not lot:
+        await call.answer()
+        return
+    text = t(lang, "confirm_delete_lot", name=lot["name"])
+    await call.message.edit_text(text, reply_markup=kb.confirm_kb(lang, f"dellotconfirm:{lot_id}"))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("dellotconfirm:"))
+async def lot_delete_execute(call: CallbackQuery):
+    lang = await db.get_user_lang(call.from_user.id)
+    lot_id = call.data.split(":")[1]
+    await db.delete_lot(lot_id)
+    await call.message.edit_text(t(lang, "lot_deleted"), reply_markup=kb.back_kb(lang, "lots"))
+    await call.answer()
