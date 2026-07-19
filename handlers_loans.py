@@ -194,3 +194,108 @@ async def loan_return_amount_entered(message: Message, state: FSMContext):
 
     await state.clear()
     await message.answer(text, reply_markup=kb.back_kb(lang, "loans"))
+
+
+# ---------- Edit loan amount ----------
+
+@router.callback_query(F.data == "loan:edit")
+async def loan_edit_start(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_user_lang(call.from_user.id)
+    loans = await db.list_all_loans()
+    loans = [l for l in loans if l["status"] == "active"]
+    if not loans:
+        await call.answer(t(lang, "no_creditors"), show_alert=True)
+        return
+    await state.set_state(LoanStates.choosing_loan_for_edit)
+    await call.message.edit_text(
+        t(lang, "select_loan_for_edit"),
+        reply_markup=kb.loans_select_for_action_kb(lang, loans, "editloan"),
+    )
+    await call.answer()
+
+
+@router.callback_query(LoanStates.choosing_loan_for_edit, F.data.startswith("editloan:"))
+async def loan_edit_selected(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_user_lang(call.from_user.id)
+    loan_id = call.data.split(":")[1]
+    from bson import ObjectId
+    loan = await db.loans_col.find_one({"_id": ObjectId(loan_id)})
+    await state.update_data(loan_id=loan_id, currency=loan["currency"])
+    await state.set_state(LoanStates.entering_new_loan_amount)
+    await call.message.edit_text(
+        t(lang, "enter_new_loan_amount", old_amount=loan["amount"], currency=loan["currency"]),
+        reply_markup=kb.cancel_kb(lang),
+    )
+    await call.answer()
+
+
+@router.message(LoanStates.entering_new_loan_amount)
+async def loan_new_amount_entered(message: Message, state: FSMContext):
+    lang = await db.get_user_lang(message.from_user.id)
+    try:
+        new_amount = float(message.text.replace(",", ".").strip())
+        if new_amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer(t(lang, "invalid_number"))
+        return
+
+    data = await state.get_data()
+    loan_id = data["loan_id"]
+    currency = data["currency"]
+
+    from bson import ObjectId
+    loan = await db.loans_col.find_one({"_id": ObjectId(loan_id)})
+    old_amount = loan["amount"]
+
+    result = await db.update_loan_amount(loan_id, new_amount)
+    if result is None:
+        await message.answer(t(lang, "invalid_number"))
+        return
+    remaining, status = result
+
+    text = t(lang, "loan_amount_updated", old_amount=old_amount, new_amount=new_amount, currency=currency, remaining=remaining)
+    await state.clear()
+    await message.answer(text, reply_markup=kb.back_kb(lang, "loans"))
+
+
+# ---------- Delete loan ----------
+
+@router.callback_query(F.data == "loan:delete")
+async def loan_delete_start(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_user_lang(call.from_user.id)
+    loans = await db.list_all_loans()
+    if not loans:
+        await call.answer(t(lang, "no_creditors"), show_alert=True)
+        return
+    await call.message.edit_text(
+        t(lang, "select_loan_for_edit"),
+        reply_markup=kb.loans_select_for_action_kb(lang, loans, "delloan"),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("delloan:"))
+async def loan_delete_confirm(call: CallbackQuery):
+    lang = await db.get_user_lang(call.from_user.id)
+    loan_id = call.data.split(":")[1]
+    from bson import ObjectId
+    loan = await db.loans_col.find_one({"_id": ObjectId(loan_id)})
+    if not loan:
+        await call.answer()
+        return
+    text = t(
+        lang, "confirm_delete_loan",
+        name=loan["creditor_name"], amount=loan["amount"], currency=loan["currency"], remaining=loan["remaining"],
+    )
+    await call.message.edit_text(text, reply_markup=kb.confirm_kb(lang, f"delloanconfirm:{loan_id}"))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("delloanconfirm:"))
+async def loan_delete_execute(call: CallbackQuery):
+    lang = await db.get_user_lang(call.from_user.id)
+    loan_id = call.data.split(":")[1]
+    await db.delete_loan(loan_id)
+    await call.message.edit_text(t(lang, "loan_deleted"), reply_markup=kb.back_kb(lang, "loans"))
+    await call.answer()
