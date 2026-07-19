@@ -22,6 +22,10 @@ TEXTS = {
         "cash_add": "➕ Пополнить",
         "cash_withdraw": "➖ Списать",
         "cash_exchange": "🔄 Обмен валюты",
+        "cash_lot_movements": "📦 По лотам",
+        "lot_movements_title": "📦 Приход/расход по лотам",
+        "lot_movement_item_open": "🟡 {name}: расход {expenses}",
+        "lot_movement_item_closed": "✅ {name}: приход {received}, расход {expenses}, прибыль {profit:.2f} {currency}",
         "choose_currency": "Выберите валюту:",
         "enter_amount": "Введите сумму:",
         "enter_comment": "Комментарий (или отправьте «-» чтобы пропустить):",
@@ -103,7 +107,7 @@ TEXTS = {
         "enter_new_agreed_amount": "Введите новую согласованную сумму по тендеру (было: {old_amount} {currency}):",
         "agreed_amount_updated": "✅ Согласованная сумма изменена: {old_amount} → {new_amount} {currency}",
         "enter_new_received_amount": "Введите новую сумму, полученную от организации (было: {old_amount} {currency}):",
-        "received_amount_updated": "✅ Сумма пересчитана: {old_amount} → {new_amount} {currency}\n📈 Новая прибыль: {profit:.2f} {currency}",
+        "received_amount_updated": "✅ Сумма пересчитана: {old_amount} → {new_amount} {currency}\n📈 Новая прибыль: {profit:.2f} {currency}\nКасса скорректирована автоматически.",
         "confirm_delete_lot": "⚠️ Удалить лот «{name}»?\nВсе его расходы будут возвращены в кассу.",
         "lot_deleted": "✅ Лот удалён. Касса скорректирована.",
         "lot_no_expenses": "Расходов пока нет.",
@@ -128,7 +132,7 @@ TEXTS = {
             "Получено от организации: {sale:.2f} {currency}\n"
             "━━━━━━━━━━━━\n"
             "📈 Прибыль: {profit:.2f} {currency}\n\n"
-            "Не забудь занести приход в Кассу через раздел 💰 Касса → Пополнить."
+            "✅ Сумма уже зачислена в кассу автоматически."
         ),
         "lot_already_closed": "Этот лот уже закрыт.",
 
@@ -175,6 +179,10 @@ TEXTS = {
         "cash_add": "➕ To'ldirish",
         "cash_withdraw": "➖ Yechish",
         "cash_exchange": "🔄 Valyuta almashish",
+        "cash_lot_movements": "📦 Lotlar bo'yicha",
+        "lot_movements_title": "📦 Lotlar bo'yicha kirim/chiqim",
+        "lot_movement_item_open": "🟡 {name}: chiqim {expenses}",
+        "lot_movement_item_closed": "✅ {name}: kirim {received}, chiqim {expenses}, foyda {profit:.2f} {currency}",
         "choose_currency": "Valyutani tanlang:",
         "enter_amount": "Summani kiriting:",
         "enter_comment": "Izoh (yoki «-» yuboring, o'tkazib yuborish uchun):",
@@ -253,7 +261,7 @@ TEXTS = {
         "enter_new_agreed_amount": "Tenderda kelishilgan yangi summani kiriting (avvalgisi: {old_amount} {currency}):",
         "agreed_amount_updated": "✅ Kelishilgan summa o'zgartirildi: {old_amount} → {new_amount} {currency}",
         "enter_new_received_amount": "Tashkilotdan olingan yangi summani kiriting (avvalgisi: {old_amount} {currency}):",
-        "received_amount_updated": "✅ Qayta hisoblandi: {old_amount} → {new_amount} {currency}\n📈 Yangi foyda: {profit:.2f} {currency}",
+        "received_amount_updated": "✅ Qayta hisoblandi: {old_amount} → {new_amount} {currency}\n📈 Yangi foyda: {profit:.2f} {currency}\nKassa avtomatik tuzatildi.",
         "confirm_delete_lot": "⚠️ «{name}» lotini o'chirasizmi?\nBarcha xarajatlari kassaga qaytariladi.",
         "lot_deleted": "✅ Lot o'chirildi. Kassa tuzatildi.",
         "lot_no_expenses": "Hozircha xarajat yo'q.",
@@ -278,7 +286,7 @@ TEXTS = {
             "Tashkilotdan olingan: {sale:.2f} {currency}\n"
             "━━━━━━━━━━━━\n"
             "📈 Foyda: {profit:.2f} {currency}\n\n"
-            "Tushumni Kassaga qo'shishni unutmang: 💰 Kassa → To'ldirish."
+            "✅ Summa avtomatik kassaga qo'shildi."
         ),
         "lot_already_closed": "Bu lot allaqachon yopilgan.",
 
