@@ -42,8 +42,9 @@ def cash_menu_kb(lang: str) -> InlineKeyboardMarkup:
     b.button(text=t(lang, "cash_add"), callback_data="cash:add")
     b.button(text=t(lang, "cash_withdraw"), callback_data="cash:withdraw")
     b.button(text=t(lang, "cash_exchange"), callback_data="cash:exchange")
+    b.button(text=t(lang, "cash_lot_movements"), callback_data="cash:lotmovements")
     b.button(text=t(lang, "back"), callback_data="back:main")
-    b.adjust(2, 1, 1)
+    b.adjust(2, 1, 1, 1)
     return b.as_markup()
 
 
