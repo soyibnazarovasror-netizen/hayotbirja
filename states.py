@@ -23,6 +23,9 @@ class LoanStates(StatesGroup):
     choosing_loan_for_return = State()
     entering_return_amount = State()
 
+    choosing_loan_for_edit = State()
+    entering_new_loan_amount = State()
+
 
 class LotStates(StatesGroup):
     entering_name = State()
@@ -39,4 +42,7 @@ class LotStates(StatesGroup):
 
     entering_sale_currency = State()
     entering_sale_amount = State()
-    
+
+    entering_new_agreed_amount = State()
+    entering_new_received_amount = State()
+    entering_edit_expense_amount = State()
