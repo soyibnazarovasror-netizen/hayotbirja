@@ -43,7 +43,6 @@ async def cash_add_start(call: CallbackQuery, state: FSMContext):
     await state.set_state(CashStates.choosing_currency)
     await call.message.edit_text(t(lang, "choose_currency"), reply_markup=kb.currency_kb(lang, "currency"))
     await call.answer()
-    await call.answer()
 
 
 @router.callback_query(F.data == "cash:withdraw")
@@ -77,7 +76,9 @@ async def cash_amount_entered(message: Message, state: FSMContext):
         return
     await state.update_data(amount=amount)
     await state.set_state(CashStates.entering_comment)
-    await message.answer(t(lang, "enter_comment"), reply_markup=kb.skip_comment_kb(lang))
+    data = await state.get_data()
+    prompt_key = "enter_income_source" if data["action"] == "add" else "enter_expense_purpose"
+    await message.answer(t(lang, prompt_key), reply_markup=kb.skip_comment_kb(lang))
 
 
 @router.callback_query(CashStates.entering_comment, F.data == "skip_comment")
@@ -101,16 +102,13 @@ async def finalize_cash_operation(message_target, state: FSMContext, user_id: in
 
     if action == "add":
         await db.adjust_cash(currency, amount)
-        reason = data.get("reason", "manual")
-        if reason == "lot":
-            note = f"Приход от лота «{data.get('lot_name')}»: +{amount} {currency}. {comment}"
-        else:
-            note = f"Пополнение кассы: +{amount} {currency}. {comment}"
+        note = f"+{amount} {currency} — {comment}"
         await db.add_history("cash_add", note)
         text = t(lang, "cash_added", amount=amount, currency=currency)
     else:
         await db.adjust_cash(currency, -amount)
-        await db.add_history("cash_withdraw", f"Списание с кассы: -{amount} {currency}. {comment}")
+        note = f"-{amount} {currency} — {comment}"
+        await db.add_history("cash_withdraw", note)
         text = t(lang, "cash_withdrawn", amount=amount, currency=currency)
 
     await state.clear()
@@ -214,5 +212,25 @@ async def cash_lot_movements(call: CallbackQuery):
             lines.append(t(lang, "lot_movement_item_open", name=lot["name"], expenses=expenses_str))
 
     text = t(lang, "lot_movements_title") + "\n\n" + "\n".join(lines)
+    await call.message.edit_text(text, reply_markup=kb.back_kb(lang, "cash"))
+    await call.answer()
+
+
+# ---------- Cash operations history ----------
+
+@router.callback_query(F.data == "cash:history")
+async def cash_history_list(call: CallbackQuery):
+    lang = await db.get_user_lang(call.from_user.id)
+    records = await db.get_cash_history(limit=30)
+    if not records:
+        await call.message.edit_text(t(lang, "no_history"), reply_markup=kb.back_kb(lang, "cash"))
+        await call.answer()
+        return
+
+    lines = []
+    for r in records:
+        icon = "🟢" if r["type"] == "cash_add" else "🔴"
+        lines.append(f"{icon} {r['date'].strftime('%d.%m %H:%M')} — {r['text']}")
+    text = t(lang, "cash_history_title") + "\n\n" + "\n".join(lines)
     await call.message.edit_text(text, reply_markup=kb.back_kb(lang, "cash"))
     await call.answer()
