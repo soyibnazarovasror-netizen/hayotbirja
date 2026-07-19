@@ -374,6 +374,12 @@ async def get_recent_history(limit: int = 15) -> list:
     return [doc async for doc in cursor]
 
 
+async def get_cash_history(limit: int = 30) -> list:
+    """История только по ручным операциям кассы (пополнение/списание) — с комментарием источника/назначения."""
+    cursor = history_col.find({"type": {"$in": ["cash_add", "cash_withdraw"]}}).sort("date", -1).limit(limit)
+    return [doc async for doc in cursor]
+
+
 # ---------- Reports ----------
 
 async def get_lots_profit_summary() -> dict:
