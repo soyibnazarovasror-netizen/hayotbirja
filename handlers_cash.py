@@ -39,45 +39,10 @@ async def back_to_cash(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "cash:add")
 async def cash_add_start(call: CallbackQuery, state: FSMContext):
     lang = await db.get_user_lang(call.from_user.id)
-    await state.set_state(CashStates.choosing_add_reason)
-    await call.message.edit_text(t(lang, "cash_add_reason"), reply_markup=kb.cash_add_reason_kb(lang))
-    await call.answer()
-
-
-@router.callback_query(CashStates.choosing_add_reason, F.data.startswith("cashreason:"))
-async def cash_add_reason_chosen(call: CallbackQuery, state: FSMContext):
-    lang = await db.get_user_lang(call.from_user.id)
-    reason = call.data.split(":")[1]
-    if reason == "lot":
-        lots = await db.list_lots(status="closed")
-        if not lots:
-            await call.answer(t(lang, "no_lots"), show_alert=True)
-            return
-        b_kb = kb.lots_list_kb(lang, lots)
-        # переиспользуем клавиатуру, но callback другой префикс - подменим вручную
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        b = InlineKeyboardBuilder()
-        for lot in lots:
-            b.button(text=f"✅ {lot['name']}", callback_data=f"incomelot:{lot['_id']}")
-        b.button(text=t(lang, "cancel"), callback_data="cancel")
-        b.adjust(1)
-        await state.set_state(CashStates.choosing_lot_for_income)
-        await call.message.edit_text(t(lang, "select_lot_for_income"), reply_markup=b.as_markup())
-    else:
-        await state.update_data(action="add", reason="manual")
-        await state.set_state(CashStates.choosing_currency)
-        await call.message.edit_text(t(lang, "choose_currency"), reply_markup=kb.currency_kb(lang, "currency"))
-    await call.answer()
-
-
-@router.callback_query(CashStates.choosing_lot_for_income, F.data.startswith("incomelot:"))
-async def cash_income_lot_chosen(call: CallbackQuery, state: FSMContext):
-    lang = await db.get_user_lang(call.from_user.id)
-    lot_id = call.data.split(":")[1]
-    lot = await db.get_lot(lot_id)
-    await state.update_data(action="add", reason="lot", lot_name=lot["name"])
+    await state.update_data(action="add", reason="manual")
     await state.set_state(CashStates.choosing_currency)
     await call.message.edit_text(t(lang, "choose_currency"), reply_markup=kb.currency_kb(lang, "currency"))
+    await call.answer()
     await call.answer()
 
 
@@ -220,3 +185,34 @@ async def exchange_rate_entered(message: Message, state: FSMContext):
     text = t(lang, "exchange_done", from_amt=amount, from_cur=from_cur, to_amt=to_amount, to_cur=to_cur, rate=rate)
     await state.clear()
     await message.answer(text, reply_markup=kb.back_kb(lang, "cash"))
+
+
+# ---------- Lot movements ----------
+
+@router.callback_query(F.data == "cash:lotmovements")
+async def cash_lot_movements(call: CallbackQuery):
+    lang = await db.get_user_lang(call.from_user.id)
+    lots = await db.get_lots_cash_movements()
+    if not lots:
+        await call.message.edit_text(t(lang, "no_lots"), reply_markup=kb.back_kb(lang, "cash"))
+        await call.answer()
+        return
+
+    lines = []
+    for lot in lots:
+        expenses_str = ", ".join(f"{amt:.0f} {cur}" for cur, amt in lot["expenses"].items()) or "0"
+        if lot["status"] == "closed" and lot["received_amount"] is not None:
+            currency = lot["received_currency"]
+            spent_in_currency = lot["expenses"].get(currency, 0)
+            profit = lot["received_amount"] - spent_in_currency
+            lines.append(t(
+                lang, "lot_movement_item_closed",
+                name=lot["name"], received=f"{lot['received_amount']:.0f} {currency}",
+                expenses=expenses_str, profit=profit, currency=currency,
+            ))
+        else:
+            lines.append(t(lang, "lot_movement_item_open", name=lot["name"], expenses=expenses_str))
+
+    text = t(lang, "lot_movements_title") + "\n\n" + "\n".join(lines)
+    await call.message.edit_text(text, reply_markup=kb.back_kb(lang, "cash"))
+    await call.answer()
