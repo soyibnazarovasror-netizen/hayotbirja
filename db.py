@@ -214,7 +214,18 @@ async def list_lots(status: str = None) -> list:
 
 async def get_lot(lot_id):
     from bson import ObjectId
-    return await lots_col.find_one({"_id": ObjectId(lot_id)})
+    lot = await lots_col.find_one({"_id": ObjectId(lot_id)})
+    if not lot:
+        return None
+    # Миграция: у расходов, добавленных до введения id, проставляем его на лету
+    needs_fix = False
+    for e in lot["expenses"]:
+        if "id" not in e:
+            e["id"] = str(ObjectId())
+            needs_fix = True
+    if needs_fix:
+        await lots_col.update_one({"_id": ObjectId(lot_id)}, {"$set": {"expenses": lot["expenses"]}})
+    return lot
 
 
 async def add_lot_expense(lot_id, category: str, amount: float, currency: str, comment: str):
