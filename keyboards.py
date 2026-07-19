@@ -78,8 +78,28 @@ def loans_menu_kb(lang: str) -> InlineKeyboardMarkup:
     b.button(text=t(lang, "loan_add"), callback_data="loan:add")
     b.button(text=t(lang, "loan_return"), callback_data="loan:return")
     b.button(text=t(lang, "loans_list"), callback_data="loan:list")
+    b.button(text=t(lang, "loan_edit"), callback_data="loan:edit")
+    b.button(text=t(lang, "loan_delete"), callback_data="loan:delete")
     b.button(text=t(lang, "back"), callback_data="back:main")
-    b.adjust(2, 1, 1)
+    b.adjust(2, 1, 2, 1)
+    return b.as_markup()
+
+
+def loans_select_for_action_kb(lang: str, loans: list, prefix: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for loan in loans:
+        label = f"{loan['creditor_name']}: {loan['amount']:.0f} {loan['currency']} ({loan['created_at'].strftime('%d.%m.%y')})"
+        b.button(text=label, callback_data=f"{prefix}:{loan['_id']}")
+    b.button(text=t(lang, "cancel"), callback_data="cancel")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def confirm_kb(lang: str, yes_cb: str, no_cb: str = "cancel") -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text=t(lang, "confirm_yes"), callback_data=yes_cb)
+    b.button(text=t(lang, "confirm_no"), callback_data=no_cb)
+    b.adjust(2)
     return b.as_markup()
 
 
@@ -132,7 +152,30 @@ def lot_detail_kb(lang: str, lot_id: str, status: str) -> InlineKeyboardMarkup:
     if status != "closed":
         b.button(text=t(lang, "lot_change_status"), callback_data=f"lotaction:status:{lot_id}")
         b.button(text=t(lang, "lot_close"), callback_data=f"lotaction:close:{lot_id}")
+        b.button(text=t(lang, "lot_edit_agreed"), callback_data=f"lotaction:editagreed:{lot_id}")
+    else:
+        b.button(text=t(lang, "lot_edit_received"), callback_data=f"lotaction:editreceived:{lot_id}")
+    b.button(text=t(lang, "lot_delete"), callback_data=f"lotaction:delete:{lot_id}")
     b.button(text=t(lang, "back"), callback_data="back:lots")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def expenses_list_kb(lang: str, lot_id: str, expenses: list, cat_labels: dict) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for e in expenses:
+        label = f"{cat_labels.get(e['category'], e['category'])}: {e['amount']:.0f} {e['currency']}"
+        b.button(text=label, callback_data=f"expsel:{lot_id}:{e['id']}")
+    b.button(text=t(lang, "back"), callback_data=f"viewlot:{lot_id}")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def expense_action_kb(lang: str, lot_id: str, expense_id: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text=t(lang, "expense_edit_amount_btn"), callback_data=f"expedit:{lot_id}:{expense_id}")
+    b.button(text=t(lang, "expense_delete_btn"), callback_data=f"expdel:{lot_id}:{expense_id}")
+    b.button(text=t(lang, "cancel"), callback_data=f"viewlot:{lot_id}")
     b.adjust(1)
     return b.as_markup()
 
