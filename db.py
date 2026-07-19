@@ -144,6 +144,43 @@ async def return_loan_amount(loan_id, amount: float):
     return new_remaining, new_status
 
 
+async def update_loan_amount(loan_id, new_amount: float):
+    """Меняем изначальную сумму займа (например, если ввели неверно).
+    Остаток долга пересчитывается с учётом уже сделанных возвратов,
+    а касса корректируется на разницу."""
+    from bson import ObjectId
+    loan = await loans_col.find_one({"_id": ObjectId(loan_id)})
+    if not loan:
+        return None
+    already_returned = loan["amount"] - loan["remaining"]
+    new_remaining = round(new_amount - already_returned, 2)
+    new_status = "done" if new_remaining <= 0.009 else "active"
+    delta = new_amount - loan["amount"]  # разница уходит в кассу
+    await loans_col.update_one(
+        {"_id": ObjectId(loan_id)},
+        {"$set": {"amount": new_amount, "remaining": max(new_remaining, 0), "status": new_status}},
+    )
+    await adjust_cash(loan["currency"], delta)
+    await add_history(
+        "loan_edit",
+        f"{loan['creditor_name']}: сумма займа изменена {loan['amount']} → {new_amount} {loan['currency']}",
+    )
+    return new_remaining, new_status
+
+
+async def delete_loan(loan_id):
+    """Полностью удаляем займ. Из кассы вычитается его текущий непогашенный остаток
+    (эффект от суммы займа и уже сделанных возвратов взаимно гасится)."""
+    from bson import ObjectId
+    loan = await loans_col.find_one({"_id": ObjectId(loan_id)})
+    if not loan:
+        return None
+    await adjust_cash(loan["currency"], -loan["remaining"])
+    await loans_col.delete_one({"_id": ObjectId(loan_id)})
+    await add_history("loan_delete", f"Займ {loan['creditor_name']} ({loan['amount']} {loan['currency']}) удалён")
+    return loan
+
+
 # ---------- Lots ----------
 # Механика тендера: при создании лота деньги НЕ списываются с кассы —
 # agreed_amount это лишь справочная сумма, за которую выигран тендер.
@@ -182,11 +219,59 @@ async def get_lot(lot_id):
 
 async def add_lot_expense(lot_id, category: str, amount: float, currency: str, comment: str):
     from bson import ObjectId
-    expense = {"category": category, "amount": amount, "currency": currency, "comment": comment, "date": now()}
+    expense = {
+        "id": str(ObjectId()),
+        "category": category, "amount": amount, "currency": currency,
+        "comment": comment, "date": now(),
+    }
     await lots_col.update_one({"_id": ObjectId(lot_id)}, {"$push": {"expenses": expense}})
     await adjust_cash(currency, -amount)
     lot = await get_lot(lot_id)
     await add_history("lot_expense", f"Лот «{lot['name']}»: расход {category} {amount} {currency}")
+
+
+async def update_lot_expense(lot_id, expense_id: str, new_amount: float):
+    """Меняем сумму расхода и корректируем кассу на разницу."""
+    from bson import ObjectId
+    lot = await get_lot(lot_id)
+    if not lot:
+        return None
+    expense = next((e for e in lot["expenses"] if e.get("id") == expense_id), None)
+    if not expense:
+        return None
+    old_amount = expense["amount"]
+    delta = old_amount - new_amount  # если новая сумма больше — с кассы спишется ещё
+    await lots_col.update_one(
+        {"_id": ObjectId(lot_id), "expenses.id": expense_id},
+        {"$set": {"expenses.$.amount": new_amount}},
+    )
+    await adjust_cash(expense["currency"], delta)
+    await add_history(
+        "lot_expense_edit",
+        f"Лот «{lot['name']}»: расход изменён {old_amount} → {new_amount} {expense['currency']}",
+    )
+    return expense
+
+
+async def delete_lot_expense(lot_id, expense_id: str):
+    """Удаляем расход и возвращаем сумму в кассу."""
+    from bson import ObjectId
+    lot = await get_lot(lot_id)
+    if not lot:
+        return None
+    expense = next((e for e in lot["expenses"] if e.get("id") == expense_id), None)
+    if not expense:
+        return None
+    await lots_col.update_one(
+        {"_id": ObjectId(lot_id)},
+        {"$pull": {"expenses": {"id": expense_id}}},
+    )
+    await adjust_cash(expense["currency"], expense["amount"])
+    await add_history(
+        "lot_expense_delete",
+        f"Лот «{lot['name']}»: удалён расход {expense['amount']} {expense['currency']}",
+    )
+    return expense
 
 
 async def set_lot_status(lot_id, status: str):
@@ -220,6 +305,46 @@ async def close_lot(lot_id, received_amount: float, received_currency: str):
 def lot_total_cost(lot: dict, currency: str) -> float:
     """Сумма всех расходов лота в заданной валюте (закупка товара тоже проходит как расход)."""
     return sum(e["amount"] for e in lot["expenses"] if e["currency"] == currency)
+
+
+async def update_lot_agreed_amount(lot_id, new_amount: float):
+    """Меняем справочную согласованную сумму по тендеру (на кассу не влияет)."""
+    from bson import ObjectId
+    await lots_col.update_one({"_id": ObjectId(lot_id)}, {"$set": {"agreed_amount": new_amount}})
+    lot = await get_lot(lot_id)
+    await add_history("lot_edit", f"Лот «{lot['name']}»: согласованная сумма изменена на {new_amount} {lot['currency']}")
+
+
+async def update_lot_received(lot_id, new_received_amount: float):
+    """Меняем сумму, полученную от организации, и пересчитываем прибыль (только для закрытых лотов)."""
+    from bson import ObjectId
+    lot = await get_lot(lot_id)
+    if not lot or lot["status"] != "closed":
+        return None
+    total_expenses = sum(e["amount"] for e in lot["expenses"] if e["currency"] == lot["received_currency"])
+    new_profit = round(new_received_amount - total_expenses, 2)
+    await lots_col.update_one(
+        {"_id": ObjectId(lot_id)},
+        {"$set": {"received_amount": new_received_amount, "profit": new_profit}},
+    )
+    await add_history(
+        "lot_edit",
+        f"Лот «{lot['name']}»: сумма от организации изменена на {new_received_amount} {lot['received_currency']}",
+    )
+    return new_profit
+
+
+async def delete_lot(lot_id):
+    """Полностью удаляем лот и возвращаем в кассу все его расходы (как будто их не было)."""
+    from bson import ObjectId
+    lot = await get_lot(lot_id)
+    if not lot:
+        return None
+    for e in lot["expenses"]:
+        await adjust_cash(e["currency"], e["amount"])
+    await lots_col.delete_one({"_id": ObjectId(lot_id)})
+    await add_history("lot_delete", f"Лот «{lot['name']}» удалён")
+    return lot
 
 
 # ---------- History ----------
