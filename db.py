@@ -291,8 +291,7 @@ async def set_lot_status(lot_id, status: str):
 
 
 async def close_lot(lot_id, received_amount: float, received_currency: str):
-    """Закрытие лота: вводим сумму, реально полученную от организации.
-    Прибыль = полученная сумма - сумма всех расходов в этой же валюте."""
+    """Закрытие лота: сумма от организации сразу зачисляется в кассу."""
     from bson import ObjectId
     lot = await get_lot(lot_id)
     if not lot:
@@ -309,7 +308,8 @@ async def close_lot(lot_id, received_amount: float, received_currency: str):
             "profit": profit,
         }},
     )
-    await add_history("lot_close", f"Лот «{lot['name']}» закрыт: прибыль {profit} {received_currency}")
+    await adjust_cash(received_currency, received_amount)
+    await add_history("lot_close", f"Лот «{lot['name']}» закрыт: получено {received_amount} {received_currency}, прибыль {profit}")
     return total_expenses, profit
 
 
@@ -327,17 +327,19 @@ async def update_lot_agreed_amount(lot_id, new_amount: float):
 
 
 async def update_lot_received(lot_id, new_received_amount: float):
-    """Меняем сумму, полученную от организации, и пересчитываем прибыль (только для закрытых лотов)."""
+    """Меняем сумму, полученную от организации: пересчитываем прибыль и корректируем кассу на разницу."""
     from bson import ObjectId
     lot = await get_lot(lot_id)
     if not lot or lot["status"] != "closed":
         return None
     total_expenses = sum(e["amount"] for e in lot["expenses"] if e["currency"] == lot["received_currency"])
     new_profit = round(new_received_amount - total_expenses, 2)
+    delta = new_received_amount - lot["received_amount"]
     await lots_col.update_one(
         {"_id": ObjectId(lot_id)},
         {"$set": {"received_amount": new_received_amount, "profit": new_profit}},
     )
+    await adjust_cash(lot["received_currency"], delta)
     await add_history(
         "lot_edit",
         f"Лот «{lot['name']}»: сумма от организации изменена на {new_received_amount} {lot['received_currency']}",
@@ -346,13 +348,16 @@ async def update_lot_received(lot_id, new_received_amount: float):
 
 
 async def delete_lot(lot_id):
-    """Полностью удаляем лот и возвращаем в кассу все его расходы (как будто их не было)."""
+    """Полностью удаляем лот. Возвращаем в кассу все его расходы,
+    и если лот был закрыт — списываем ранее зачисленную сумму от организации."""
     from bson import ObjectId
     lot = await get_lot(lot_id)
     if not lot:
         return None
     for e in lot["expenses"]:
         await adjust_cash(e["currency"], e["amount"])
+    if lot["status"] == "closed" and lot.get("received_amount"):
+        await adjust_cash(lot["received_currency"], -lot["received_amount"])
     await lots_col.delete_one({"_id": ObjectId(lot_id)})
     await add_history("lot_delete", f"Лот «{lot['name']}» удалён")
     return lot
@@ -387,3 +392,21 @@ async def count_lots_by_status() -> dict:
     open_count = await lots_col.count_documents({"status": {"$in": ["open", "in_progress"]}})
     closed_count = await lots_col.count_documents({"status": "closed"})
     return {"open": open_count, "closed": closed_count}
+
+
+async def get_lots_cash_movements() -> list:
+    """Для раздела Касса: по каждому лоту — сумма расходов и (если закрыт) приход от организации."""
+    cursor = lots_col.find().sort("created_at", -1)
+    result = []
+    async for lot in cursor:
+        expenses_by_cur = {}
+        for e in lot["expenses"]:
+            expenses_by_cur[e["currency"]] = expenses_by_cur.get(e["currency"], 0) + e["amount"]
+        result.append({
+            "name": lot["name"],
+            "status": lot["status"],
+            "expenses": expenses_by_cur,
+            "received_amount": lot.get("received_amount"),
+            "received_currency": lot.get("received_currency"),
+        })
+    return result
